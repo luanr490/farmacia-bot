@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Simulador WhatsApp</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <div class="sim-fundo">
+    <div>
+      <div class="celular">
+        <div class="tela">
+          <div class="wa-topo">
+            <div class="wa-avatar">💊</div>
+            <div>
+              <div class="titulo">Farmácia Manipulação</div>
+              <div class="sub">conta comercial</div>
+            </div>
+          </div>
+          <div class="wa-numero">
+            Você é o cliente: <input id="telefone" value="5511999990001" inputmode="numeric">
+          </div>
+          <div id="mensagens" class="wa-mensagens conversa"></div>
+          <div id="preview" class="anexo-preview" hidden></div>
+          <form id="form" class="wa-rodape">
+            <label class="wa-botao anexo" title="Anexar receita" style="margin:0;cursor:pointer">
+              📎<input id="arquivo" type="file" accept="image/*,application/pdf" hidden>
+            </label>
+            <input id="texto" type="text" placeholder="Mensagem" autocomplete="off">
+            <button class="wa-botao enviar" title="Enviar">➤</button>
+          </form>
+        </div>
+      </div>
+      <p class="dica">Troque o número acima para simular outro cliente.<br>
+        Abra o <a href="/" target="_blank">painel da farmácia</a> em outra aba para responder.</p>
+    </div>
+  </div>
+
+  <script type="module">
+    import { api, renderizarBalao } from './comum.js';
+
+    const $ = (id) => document.getElementById(id);
+    let ultimaQtd = -1;
+
+    const telefone = () => $('telefone').value.replace(/\D/g, '');
+
+    async function carregar() {
+      if (telefone().length < 10) return;
+      const msgs = await api(`/simulador/conversa/${telefone()}`);
+      if (msgs.length === ultimaQtd) return;
+      ultimaQtd = msgs.length;
+      $('mensagens').innerHTML = msgs.map(renderizarBalao).join('');
+      $('mensagens').scrollTop = $('mensagens').scrollHeight;
+    }
+
+    $('arquivo').addEventListener('change', () => {
+      const f = $('arquivo').files[0];
+      $('preview').hidden = !f;
+      $('preview').textContent = f ? `📎 ${f.name} (adicione uma legenda se quiser)` : '';
+    });
+
+    $('telefone').addEventListener('change', () => { ultimaQtd = -1; carregar(); });
+
+    $('form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const dados = new FormData();
+      dados.append('telefone', telefone());
+      if ($('texto').value.trim()) dados.append('texto', $('texto').value.trim());
+      if ($('arquivo').files[0]) dados.append('arquivo', $('arquivo').files[0]);
+      if (!dados.has('texto') && !dados.has('arquivo')) return;
+      $('texto').value = '';
+      $('arquivo').value = '';
+      $('preview').hidden = true;
+      try {
+        await api('/simulador/mensagem', { method: 'POST', body: dados });
+      } catch (err) {
+        alert(err.message);
+      }
+      carregar();
+    });
+
+    carregar();
+    setInterval(carregar, 1500); // simples: pergunta ao servidor a cada 1,5s
+    $('texto').focus();
+  </script>
+</body>
+</html>

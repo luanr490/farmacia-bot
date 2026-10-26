@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Painel da Farmácia</title>
+  <link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+  <header class="topo">
+    <h1>💊 Painel da Farmácia</h1>
+    <a href="/simulador.html" target="_blank">Abrir simulador de WhatsApp ↗</a>
+  </header>
+
+  <div class="layout">
+    <aside class="coluna-lista">
+      <div id="atendimento"></div>
+      <div id="filtros" class="filtros"></div>
+      <div id="lista"></div>
+    </aside>
+    <main id="detalhe" class="detalhe">
+      <div class="vazio">Selecione um pedido à esquerda.<br><br>
+        Ainda não tem pedidos? Abra o simulador e mande uma receita.</div>
+    </main>
+  </div>
+
+  <script type="module">
+    import { api, postJson, escapar, renderizarBalao } from './comum.js';
+
+    const $ = (id) => document.getElementById(id);
+    const brl = (v) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+    let rotulos = {};          // código do status -> rótulo
+    let filtro = '';           // status filtrado na lista
+    let selecionado = null;    // id do pedido aberto
+    let assinatura = '';       // detecta se o pedido mudou, para não redesenhar à toa
+    let qtdMensagens = -1;
+
+    const etiqueta = (s) => `<span class="etiqueta s-${s}">${escapar(rotulos[s] ?? s)}</span>`;
+
+    // ---------- Lista ----------
+    async function carregarFiltros() {
+      const status = await api('/status');
+      status.forEach((s) => (rotulos[s.codigo] = s.rotulo));
+      const opcoes = [{ codigo: '', rotulo: 'Todos' }, ...status];
+      $('filtros').innerHTML = opcoes
+        .map((s) => `<button data-status="${s.codigo}" class="${s.codigo === filtro ? 'ativo' : ''}">${escapar(s.rotulo)}</button>`)
+        .join('');
+    }
+
+    $('filtros').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      filtro = b.dataset.status;
+      document.querySelectorAll('#filtros button').forEach((x) => x.classList.toggle('ativo', x === b));
+      carregarLista();
+    });
+
+    async function carregarLista() {
+      const pedidos = await api(`/pedidos${filtro ? `?status=${filtro}` : ''}`);
+      $('lista').innerHTML = pedidos.length
+        ? pedidos.map((p) => `
+            <div class="item ${p.id === selecionado ? 'selecionado' : ''}" data-id="${p.id}">
+              <div class="linha"><span class="nome">#${p.id} · ${escapar(p.cliente_nome ?? p.cliente_telefone)}</span>${etiqueta(p.status)}</div>
+              <div class="meta">${escapar(p.cliente_telefone)} · ${escapar(p.criado_em.slice(0, 16))}</div>
+            </div>`).join('')
+        : '<div class="vazio">Nenhum pedido.</div>';
+    }
+
+    $('lista').addEventListener('click', (e) => {
+      const item = e.target.closest('.item');
+      if (!item) return;
+      selecionado = Number(item.dataset.id);
+      assinatura = '';
+      qtdMensagens = -1;
+      carregarLista();
+      carregarDetalhe();
+    });
+
+    async function carregarAtendimento() {
+      const clientes = await api('/atendimento');
+      $('atendimento').innerHTML = clientes.map((c) => `
+        <div class="alerta">👩‍⚕️ <b>${escapar(c.nome ?? c.telefone)}</b> pediu para falar com um atendente.
+          <br><button data-encerrar="${c.id}">Marcar como atendido</button>
+        </div>`).join('');
+    }
+
+    $('atendimento').addEventListener('click', async (e) => {
+      const id = e.target.dataset.encerrar;
+      if (!id) return;
+      await postJson(`/clientes/${id}/encerrar-atendimento`, {});
+      carregarAtendimento();
+    });
+
+    // ---------- Detalhe ----------
+    async function carregarDetalhe() {
+      if (!selecionado) return;
+      const { pedido, cliente, mensagens, proximos } = await api(`/pedidos/${selecionado}`);
+      const nova = `${pedido.status}|${pedido.atualizado_em}`;
+      if (nova !== assinatura) {
+        assinatura = nova;
+        qtdMensagens = -1;
+        $('detalhe').innerHTML = montarDetalhe(pedido, cliente, proximos);
+      }
+      if (mensagens.length !== qtdMensagens) {
+        qtdMensagens = mensagens.length;
+        const caixa = $('conversa');
+        caixa.innerHTML = mensagens.map(renderizarBalao).join('');
+        caixa.scrollTop = caixa.scrollHeight;
+      }
+    }
+
+    function montarDetalhe(p, c, proximos) {
+      const receita = !p.receita_arquivo ? '<p>Sem receita.</p>'
+        : p.receita_arquivo.endsWith('.pdf')
+          ? `<a class="pdf" href="/uploads/${escapar(p.receita_arquivo)}" target="_blank">📄 Abrir receita (PDF)</a>`
+          : `<a href="/uploads/${escapar(p.receita_arquivo)}" target="_blank"><img src="/uploads/${escapar(p.receita_arquivo)}" alt="Receita"></a>`;
+
+      const orcamento = p.status === 'AGUARDANDO_ANALISE' ? `
+        <form id="form-orcamento">
+          <label>Fórmula / descrição</label>
+          <textarea name="descricao" placeholder="Ex.: Vitamina D3 50.000 UI — 30 cápsulas"></textarea>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+            <div><label>Valor (R$)</label><input name="valor" inputmode="decimal" placeholder="89,90"></div>
+            <div><label>Prazo (dias úteis)</label><input name="prazoDias" type="number" min="1" value="3"></div>
+          </div>
+          <label class="check"><input type="checkbox" name="controlado"> Contém substância controlada (Portaria 344)</label>
+          <div class="acoes"><button class="primario">Enviar orçamento pelo WhatsApp</button></div>
+          <div id="erro-orcamento" class="erro"></div>
+        </form>`
+        : p.orcamento_descricao ? `
+          <div class="dado"><b>Fórmula:</b> ${escapar(p.orcamento_descricao)}</div>
+          <div class="dado"><b>Valor:</b> ${brl(p.orcamento_valor)}</div>
+          <div class="dado"><b>Prazo:</b> ${p.prazo_dias} dia(s) útil(eis)</div>
+          ${p.controlado ? '<div class="dado">⚠️ <b>Controlado:</b> reter receita física na retirada</div>' : ''}`
+        : '<p class="dado">Sem orçamento.</p>';
+
+      const botoes = proximos
+        .filter((s) => s !== 'ORCAMENTO_ENVIADO')
+        .map((s) => `<button data-status="${s}" class="${s === 'CANCELADO' ? 'perigo' : 'primario'}">
+            ${s === 'CANCELADO' ? 'Cancelar pedido' : `Mover para: ${escapar(rotulos[s])}`}</button>`)
+        .join('');
+      const aguardaCliente = p.status === 'ORCAMENTO_ENVIADO'
+        ? '<p class="dado">⏳ Aguardando o cliente responder SIM ou NÃO.</p>' : '';
+
+      return `
+        <div class="cabecalho-pedido"><h1>Pedido #${p.id}</h1>${etiqueta(p.status)}</div>
+        <div class="detalhe-grade">
+          <div style="display:grid;gap:20px">
+            <section class="cartao">
+              <h2>Cliente</h2>
+              <div class="dado"><b>Nome:</b> ${escapar(c.nome ?? '—')}</div>
+              <div class="dado"><b>WhatsApp:</b> ${escapar(c.telefone)}</div>
+              <div class="dado"><b>Recebido em:</b> ${escapar(p.criado_em)}</div>
+              ${p.observacao ? `<div class="dado"><b>Observação:</b> ${escapar(p.observacao)}</div>` : ''}
+            </section>
+            <section class="cartao receita"><h2>Receita</h2>${receita}</section>
+          </div>
+          <div style="display:grid;gap:20px">
+            <section class="cartao">
+              <h2>Orçamento</h2>${orcamento}${aguardaCliente}
+              ${botoes ? `<div class="acoes" id="botoes-status">${botoes}</div>` : ''}
+              <div id="erro-status" class="erro"></div>
+            </section>
+            <section class="cartao">
+              <h2>Conversa no WhatsApp</h2>
+              <div id="conversa" class="conversa painel-conversa"></div>
+              <form id="form-resposta" class="responder" data-cliente="${c.id}">
+                <input name="texto" placeholder="Responder como atendente…" autocomplete="off">
+                <button class="primario">Enviar</button>
+              </form>
+            </section>
+          </div>
+        </div>`;
+    }
+
+    // Eventos do detalhe (delegação, porque o HTML é redesenhado)
+    $('detalhe').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const form = e.target;
+      if (form.id === 'form-orcamento') {
+        const d = new FormData(form);
+        try {
+          await postJson(`/pedidos/${selecionado}/orcamento`, {
+            descricao: d.get('descricao'), valor: d.get('valor'),
+            prazoDias: d.get('prazoDias'), controlado: d.get('controlado') === 'on',
+          });
+          atualizarTudo();
+        } catch (err) { $('erro-orcamento').textContent = err.message; }
+      }
+      if (form.id === 'form-resposta') {
+        const texto = form.texto.value.trim();
+        if (!texto) return;
+        form.texto.value = '';
+        await postJson(`/clientes/${form.dataset.cliente}/mensagem`, { texto });
+        carregarDetalhe();
+      }
+    });
+
+    $('detalhe').addEventListener('click', async (e) => {
+      const b = e.target.closest('#botoes-status button');
+      if (!b) return;
+      if (b.dataset.status === 'CANCELADO' && !confirm('Cancelar este pedido? O cliente será avisado.')) return;
+      try {
+        await postJson(`/pedidos/${selecionado}/status`, { status: b.dataset.status });
+        atualizarTudo();
+      } catch (err) { $('erro-status').textContent = err.message; }
+    });
+
+    function atualizarTudo() {
+      carregarLista();
+      carregarDetalhe();
+      carregarAtendimento();
+    }
+
+    await carregarFiltros();
+    atualizarTudo();
+    setInterval(atualizarTudo, 3000);
+  </script>
+</body>
+</html>
