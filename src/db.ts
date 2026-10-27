@@ -12,17 +12,21 @@ db.pragma('foreign_keys = ON');
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS clientes (
-    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-    telefone           TEXT    NOT NULL UNIQUE,
-    nome               TEXT,
-    etapa              TEXT    NOT NULL DEFAULT 'INICIO',   -- em que ponto da conversa o cliente está
-    precisa_atendente  INTEGER NOT NULL DEFAULT 0,
-    criado_em          TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+    cpf                 TEXT PRIMARY KEY,
+    nome                TEXT,
+    email               TEXT,
+    telefone_contato    TEXT,
+    preferencia_contato TEXT,
+    endereco            TEXT,
+    tipo                TEXT,
+    crm                 TEXT,
+    criado_em           TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
   );
 
   CREATE TABLE IF NOT EXISTS pedidos (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    cliente_id          INTEGER NOT NULL REFERENCES clientes(id),
+    cliente_cpf         TEXT NOT NULL REFERENCES clientes(cpf),
+    telefone_whatsapp   TEXT    NOT NULL REFERENCES conversas(telefone_whatsapp),
     status              TEXT    NOT NULL,
     receita_arquivo     TEXT,               -- nome do arquivo em uploads/
     observacao          TEXT,               -- texto que o cliente mandou junto com a receita
@@ -35,14 +39,23 @@ db.exec(`
   );
 
   CREATE TABLE IF NOT EXISTS mensagens (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    cliente_id  INTEGER NOT NULL REFERENCES clientes(id),
-    direcao     TEXT    NOT NULL CHECK (direcao IN ('ENTRADA', 'SAIDA')),
-    texto       TEXT,
-    arquivo     TEXT,
-    criado_em   TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
-  );
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  telefone_whatsapp   TEXT    NOT NULL REFERENCES conversas(telefone_whatsapp),
+  direcao             TEXT    NOT NULL CHECK (direcao IN ('ENTRADA', 'SAIDA')),
+  texto               TEXT,
+  arquivo             TEXT,
+  criado_em           TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
 
-  CREATE INDEX IF NOT EXISTS idx_pedidos_cliente   ON pedidos(cliente_id);
-  CREATE INDEX IF NOT EXISTS idx_mensagens_cliente ON mensagens(cliente_id);
+  CREATE TABLE IF NOT EXISTS conversas (
+  telefone_whatsapp   TEXT    PRIMARY KEY,
+  etapa               TEXT    NOT NULL DEFAULT 'INICIO',
+  rascunho_cadastro   TEXT,
+  cpf_vinculado       TEXT    REFERENCES clientes(cpf),
+  precisa_atendente   INTEGER NOT NULL DEFAULT 0,
+  atualizado_em       TEXT    NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+  CREATE INDEX IF NOT EXISTS idx_pedidos_cpf  ON pedidos(cliente_cpf);
+  CREATE INDEX IF NOT EXISTS idx_mensagens_telefone ON mensagens(telefone_whatsapp);
 `);
