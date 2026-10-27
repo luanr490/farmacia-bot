@@ -1,41 +1,41 @@
 import { db } from '../db.js';
-import { enviarMensagem, obterCliente } from './clientes.js';
+import { sendMessage, getOrCreateConversation } from '../servicos/conversas.js';
 import { ROTULO_STATUS, TRANSICOES, type Pedido, type StatusPedido } from '../tipos.js';
 
 export const brl = (valor: number) => valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 export class ErroNegocio extends Error {}
 
-export function criarPedido(clienteId: number, receitaArquivo: string, observacao: string | null): Pedido {
-  const { lastInsertRowid } = db
-    .prepare("INSERT INTO pedidos (cliente_id, status, receita_arquivo, observacao) VALUES (?, 'AGUARDANDO_ANALISE', ?, ?)")
-    .run(clienteId, receitaArquivo, observacao);
-  return obterPedido(Number(lastInsertRowid))!;
-}
-
 export function obterPedido(id: number): Pedido | undefined {
   return db.prepare('SELECT * FROM pedidos WHERE id = ?').get(id) as Pedido | undefined;
 }
 
+export function criarPedido(clienteCpf: string, telefoneWhatsapp: string, receitaArquivo: string, observacao: string | null): Pedido {
+  const { lastInsertRowid } = db
+    .prepare("INSERT INTO pedidos (cliente_cpf, telefone_whatsapp, status, receita_arquivo, observacao) VALUES (?, ?, 'AGUARDANDO_ANALISE', ?, ?)")
+    .run(clienteCpf, telefoneWhatsapp, receitaArquivo, observacao);
+  return obterPedido(Number(lastInsertRowid))!;
+}
+
 export function listarPedidos(status?: string) {
   const sql = `
-    SELECT p.*, c.nome AS cliente_nome, c.telefone AS cliente_telefone
-      FROM pedidos p JOIN clientes c ON c.id = p.cliente_id
+    SELECT p.*, c.nome AS cliente_nome, p.telefone_whatsapp AS cliente_telefone
+      FROM pedidos p JOIN clientes c ON c.cpf = p.cliente_cpf
      ${status ? 'WHERE p.status = ?' : ''}
      ORDER BY p.id DESC`;
   return status ? db.prepare(sql).all(status) : db.prepare(sql).all();
 }
 
-export function pedidosAbertosDoCliente(clienteId: number): Pedido[] {
+export function pedidosAbertosDoCliente(clienteCpf: string): Pedido[] {
   return db
-    .prepare("SELECT * FROM pedidos WHERE cliente_id = ? AND status NOT IN ('ENTREGUE', 'CANCELADO') ORDER BY id")
-    .all(clienteId) as Pedido[];
+    .prepare("SELECT * FROM pedidos WHERE cliente_cpf = ? AND status NOT IN ('ENTREGUE', 'CANCELADO') ORDER BY id")
+    .all(clienteCpf) as Pedido[];
 }
 
-export function orcamentoPendente(clienteId: number): Pedido | undefined {
+export function orcamentoPendente(clienteCpf: string): Pedido | undefined {
   return db
-    .prepare("SELECT * FROM pedidos WHERE cliente_id = ? AND status = 'ORCAMENTO_ENVIADO' ORDER BY id DESC LIMIT 1")
-    .get(clienteId) as Pedido | undefined;
+    .prepare("SELECT * FROM pedidos WHERE cliente_cpf = ? AND status = 'ORCAMENTO_ENVIADO' ORDER BY id DESC LIMIT 1")
+    .get(clienteCpf) as Pedido | undefined;
 }
 
 function mudarStatus(pedido: Pedido, novo: StatusPedido) {
@@ -62,7 +62,7 @@ export async function enviarOrcamento(pedidoId: number, dados: DadosOrcamento) {
   db.prepare('UPDATE pedidos SET orcamento_descricao = ?, orcamento_valor = ?, prazo_dias = ?, controlado = ? WHERE id = ?')
     .run(dados.descricao.trim(), dados.valor, dados.prazoDias, dados.controlado ? 1 : 0, pedidoId);
 
-  const cliente = obterCliente(pedido.cliente_id)!;
+  const conversa = getOrCreateConversation(pedido.telefone_whatsapp);
   let texto =
     `📋 *Orçamento do pedido #${pedido.id}*\n\n` +
     `${dados.descricao.trim()}\n\n` +
@@ -72,7 +72,7 @@ export async function enviarOrcamento(pedidoId: number, dados: DadosOrcamento) {
     texto += '\n\n⚠️ Esta fórmula contém substância controlada. A receita original precisa ser entregue na farmácia no momento da retirada.';
   }
   texto += '\n\nResponda *SIM* para aprovar ou *NÃO* para recusar.';
-  await enviarMensagem(cliente, texto);
+  await sendMessage(conversa, texto);
 }
 
 const AVISOS: Partial<Record<StatusPedido, (p: Pedido) => string>> = {
@@ -88,7 +88,7 @@ export async function atualizarStatus(pedidoId: number, novo: StatusPedido) {
   if (!pedido) throw new ErroNegocio('Pedido não encontrado.');
   mudarStatus(pedido, novo);
   const aviso = AVISOS[novo];
-  if (aviso) await enviarMensagem(obterCliente(pedido.cliente_id)!, aviso(pedido));
+  if (aviso) await sendMessage(getOrCreateConversation(pedido.telefone_whatsapp)!, aviso(pedido));
 }
 
 /** Resposta do cliente ao orçamento (SIM/NÃO pelo WhatsApp). */

@@ -1,4 +1,4 @@
-export type Etapa = 'INICIO' | 'AGUARDANDO_NOME' | 'MENU' | 'AGUARDANDO_RECEITA';
+export type Etapa = 'INICIO' | 'AGUARDANDO_CPF' | 'AGUARDANDO_NOME' | 'MENU' | 'AGUARDANDO_RECEITA';
 export type PreferenciaContato = 'whatsapp' | 'ligacao';
 export type TipoCliente = 'cliente' | 'medico';
 

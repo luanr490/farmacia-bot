@@ -4,8 +4,9 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { processarMensagem } from '../servicos/bot.js';
 import {
-  clientesAguardandoAtendente, enviarMensagem, historico, marcarAtendente, obterCliente, obterOuCriarCliente,
-} from '../servicos/clientes.js';
+  conversationsWaitingForAgent, getHistory, getOrCreateConversation, sendMessage, setNeedsAgent,
+} from '../servicos/conversas.js';
+import { getClientByCpf } from '../servicos/clientes.js';
 import { ErroNegocio, atualizarStatus, enviarOrcamento, listarPedidos, obterPedido } from '../servicos/pedidos.js';
 import { ROTULO_STATUS, STATUS, TRANSICOES, type StatusPedido } from '../tipos.js';
 
@@ -40,8 +41,9 @@ api.post('/simulador/mensagem', upload.single('arquivo'), async (req, res) => {
 });
 
 api.get('/simulador/conversa/:telefone', (req, res) => {
-  const cliente = obterOuCriarCliente(String(req.params.telefone).replace(/\D/g, ''));
-  res.json(historico(cliente.id));
+  const telefone = String(req.params.telefone).replace(/\D/g, '');
+  getOrCreateConversation(telefone);
+  res.json(getHistory(telefone));
 });
 
 // ---------- Painel da farmácia ----------
@@ -53,8 +55,8 @@ api.get('/pedidos', (req, res) => {
 api.get('/pedidos/:id', (req, res) => {
   const pedido = obterPedido(Number(req.params.id));
   if (!pedido) return void res.status(404).json({ erro: 'Pedido não encontrado.' });
-  const cliente = obterCliente(pedido.cliente_id)!;
-  res.json({ pedido, cliente, mensagens: historico(cliente.id), proximos: TRANSICOES[pedido.status] });
+  const cliente = getClientByCpf(pedido.cliente_cpf)!;
+  res.json({ pedido, cliente, mensagens: getHistory(pedido.telefone_whatsapp), proximos: TRANSICOES[pedido.status] });
 });
 
 api.post('/pedidos/:id/orcamento', async (req, res) => {
@@ -77,21 +79,22 @@ api.post('/pedidos/:id/status', async (req, res) => {
 });
 
 api.get('/atendimento', (_req, res) => {
-  res.json(clientesAguardandoAtendente());
+  res.json(conversationsWaitingForAgent());
 });
 
 // Atendente humano escrevendo direto para o cliente.
-api.post('/clientes/:id/mensagem', async (req, res) => {
-  const cliente = obterCliente(Number(req.params.id));
+api.post('/conversas/:telefone/mensagem', async (req, res) => {
+  const telefone = String(req.params.telefone).replace(/\D/g, '');
+  const conversa = getOrCreateConversation(telefone);
   const texto = String(req.body?.texto ?? '').trim();
-  if (!cliente) return void res.status(404).json({ erro: 'Cliente não encontrado.' });
   if (!texto) return void res.status(400).json({ erro: 'Mensagem vazia.' });
-  await enviarMensagem(cliente, texto);
+  await sendMessage(conversa, texto);
   res.json({ ok: true });
 });
 
-api.post('/clientes/:id/encerrar-atendimento', (req, res) => {
-  marcarAtendente(Number(req.params.id), false);
+api.post('/conversas/:telefone/encerrar-atendimento', (req, res) => {
+  const telefone = String(req.params.telefone).replace(/\D/g, '');
+  setNeedsAgent(telefone, false);
   res.json({ ok: true });
 });
 
