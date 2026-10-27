@@ -1,4 +1,6 @@
 export type Etapa = 'INICIO' | 'AGUARDANDO_NOME' | 'MENU' | 'AGUARDANDO_RECEITA';
+export type PreferenciaContato = 'whatsapp' | 'ligacao';
+export type TipoCliente = 'cliente' | 'medico';
 
 export const STATUS = [
   'AGUARDANDO_ANALISE',
@@ -33,17 +35,30 @@ export const TRANSICOES: Record<StatusPedido, StatusPedido[]> = {
 };
 
 export interface Cliente {
-  id: number;
-  telefone: string;
+  cpf: string;
   nome: string | null;
-  etapa: Etapa;
-  precisa_atendente: number;
+  email: string | null;
+  telefone_contato: string | null;
+  preferencia_contato: PreferenciaContato | null;
+  endereco: string | null;
+  tipo: TipoCliente | null;
+  crm: string | null;
   criado_em: string;
+}
+
+export interface Conversa {
+  telefone_whatsapp: string;
+  etapa: Etapa;
+  rascunho_cadastro: string | null;
+  cpf_vinculado: string | null;
+  precisa_atendente: number;
+  atualizado_em: string;
 }
 
 export interface Pedido {
   id: number;
-  cliente_id: number;
+  cliente_cpf: string;
+  telefone_whatsapp: string;
   status: StatusPedido;
   receita_arquivo: string | null;
   observacao: string | null;
@@ -57,7 +72,7 @@ export interface Pedido {
 
 export interface Mensagem {
   id: number;
-  cliente_id: number;
+  telefone_whatsapp: string;
   direcao: 'ENTRADA' | 'SAIDA';
   texto: string | null;
   arquivo: string | null;
